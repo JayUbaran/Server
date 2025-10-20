@@ -3277,10 +3277,11 @@ app.get("/api/employer-invite-count", (req, res) => {
 });
 
 
-app.use(express.static(path.join(__dirname, "build")));
+app.use(express.static("build"));
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "build", "index.html"));
 });
+
 
 // Start Server
 const PORT = process.env.PORT || 5000;  // 5000 for local dev
