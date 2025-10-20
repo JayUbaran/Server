@@ -1247,36 +1247,33 @@ app.get("/api/posts", (req, res) => {
     }
 
     const postsMap = results.reduce((acc, row) => {
-      if (!acc[row.post_id]) {
-        acc[row.post_id] = {
-          id: row.post_id,
-          user_id: row.user_id,
-          username: row.first_name,
-          lastname: row.last_name,
-          profile_image: row.profile,
-          content: row.content,
-          date_posted: row.date_posted,
-          images: [],
-          location: row.location_name
-            ? {
-                name: row.location_name,
-                lat: row.latitude,
-                lon: row.longitude,
-              }
-            : null,
-        };
-      }
+  if (!acc[row.post_id]) {
+    acc[row.post_id] = {
+      id: row.post_id,
+      user_id: row.user_id,
+      username: row.first_name,
+      lastname: row.last_name,
+      profile_image: row.profile,
+      content: row.content,
+      date_posted: row.date_posted,
+      images: [],
+      location: row.location_name
+        ? { name: row.location_name, lat: row.latitude, lon: row.longitude }
+        : null,
+    };
+  }
 
-      // ✅ Fix: Normalize image paths
-      if (row.image_url) {
-        const cleanUrl = row.image_url.startsWith("/")
-          ? row.image_url
-          : `/${row.image_url}`;
-        acc[row.post_id].images.push(cleanUrl);
-      }
+  if (row.image_url) {
+    // Only prepend / if it's a relative path (doesn't start with http or https)
+    const cleanUrl = row.image_url.startsWith("http")
+      ? row.image_url
+      : `/${row.image_url}`;
+    acc[row.post_id].images.push(cleanUrl);
+  }
 
-      return acc;
-    }, {});
+  return acc;
+}, {});
+
 
     res.json(Object.values(postsMap));
   });
@@ -1688,47 +1685,51 @@ app.post("/api/incrementlater", (req, res) => {
   });
 });
 
-
-// Ensure 'uploads' directory exists
-const uploadDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir);
-}
-
-// Fix multer configuration (Use `storage` instead of `eventimage`)
-const eventimage = multer.diskStorage({
-  destination: (req, file, cb) => {
-      cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-      cb(null, `${Date.now()}-${file.originalname}`);
+// ✅ Multer + Cloudinary Storage
+const eventStorage = new CloudinaryStorage({
+  cloudinary: cloudinary.v2,
+  params: async (req, file) => {
+    const folderName = "event_uploads";
+    const publicId = `${Date.now()}-${path.parse(file.originalname).name}`;
+    return {
+      folder: folderName,
+      public_id: publicId,
+      resource_type: "auto", // handles images, videos, etc.
+      transformation: [{ quality: "auto", fetch_format: "auto" }],
+    };
   },
 });
-const eventupload = multer({ storage: eventimage }); // ✅ Fixed here
 
-// 📅 Post an Event
-app.post("/api/events", eventupload.array("images", 5), (req, res) => {
-  if (!req.session.user) {
-    return res.status(401).json({ error: "User not authenticated" });
-  }
+const eventUpload = multer({
+  storage: eventStorage,
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB max per file
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ["image/jpeg", "image/png", "image/jpg", "image/webp"];
+    if (!allowedTypes.includes(file.mimetype)) {
+      return cb(new Error("Only JPEG, PNG, JPG, and WEBP files are allowed."));
+    }
+    cb(null, true);
+  },
+});
+
+// 📅 POST Event with Cloudinary
+app.post("/api/events", eventUpload.array("images", 5), (req, res) => {
+  if (!req.session.user) return res.status(401).json({ error: "User not authenticated" });
 
   const user_id = req.session.user.id;
   const { content, location_name, latitude, longitude } = req.body;
+  const files = req.files || [];
 
-  // ✅ If no images, still allow posting
-  const imagePaths = req.files && req.files.length > 0
-    ? req.files.map((file) => `/uploads/${file.filename}`)
-    : [];
+  // Map Cloudinary URLs
+  const imageUrls = files.map((file) => file.path);
 
-  // ✅ Insert into events (images optional)
   const sql = `
     INSERT INTO events (user_id, content, location_name, latitude, longitude, images) 
     VALUES (?, ?, ?, ?, ?, ?)
   `;
-
   db.query(
     sql,
-    [user_id, content, location_name || null, latitude || null, longitude || null, JSON.stringify(imagePaths)],
+    [user_id, content, location_name || null, latitude || null, longitude || null, JSON.stringify(imageUrls)],
     (err, result) => {
       if (err) {
         console.error("❌ Event insert error:", err);
@@ -1736,31 +1737,27 @@ app.post("/api/events", eventupload.array("images", 5), (req, res) => {
       }
 
       const newEventId = result.insertId;
-      const message = `posted a new EVENT.`;
 
-      // 🔔 Insert notification
+      // 🔔 Create notification
       const notifSql = `
         INSERT INTO notifications (type, message, related_id, user_id, created_at)
         VALUES (?, ?, ?, ?, NOW())
       `;
-      db.query(notifSql, ["event", message, newEventId, user_id], (notifErr) => {
-        if (notifErr) {
-          console.error("❌ Notification error:", notifErr.message || notifErr);
-          // Not critical, so continue
-        }
+      db.query(notifSql, ["event", "posted a new EVENT", newEventId, user_id], (notifErr) => {
+        if (notifErr) console.error("❌ Notification error:", notifErr.message || notifErr);
 
-        res.json({
+        res.status(201).json({
           success: true,
           message: "Event posted successfully!",
           event_id: newEventId,
-          images: imagePaths,
+          images: imageUrls,
         });
       });
     }
   );
 });
 
-// Get All Events
+// ✅ GET all events
 app.get("/api/events", (req, res) => {
   const sql = `
     SELECT e.*, 
@@ -1773,61 +1770,36 @@ app.get("/api/events", (req, res) => {
   `;
 
   db.query(sql, (err, results) => {
-    if (err) {
-      console.error("❌ Error fetching events:", err.message);
-      return res.status(500).json({ error: err.message });
-    }
-
+    if (err) return res.status(500).json({ error: err.message });
     res.json({ success: true, events: results });
   });
 });
 
-
-// Get Events by User
-app.get("/api/events/user", (req, res) => {
-  if (!req.session.user) {
-      return res.status(401).json({ error: "User not authenticated" });
-  }
-
-  const user_id = req.session.user.id;
-  const sql = "SELECT * FROM events WHERE user_id = ? ORDER BY created_at DESC";
-
-  db.query(sql, [user_id], (err, results) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(results);
-  });
-});
-
-// Delete Event (Only if the logged-in user is the owner)
-app.delete("/api/events/:id", (req, res) => {
-  if (!req.session.user) {
-      return res.status(401).json({ error: "User not authenticated" });
-  }
-
-  const user_id = req.session.user.id;
-  const event_id = req.params.id;
-
-  const sql = "DELETE FROM events WHERE id = ? AND user_id = ?";
-  db.query(sql, [event_id, user_id], (err, result) => {
-      if (err) return res.status(500).json({ error: err.message });
-      if (result.affectedRows === 0) return res.status(403).json({ error: "Not authorized to delete this event" });
-
-      res.json({ success: true, message: "Event deleted successfully!" });
-  });
-});
-
-// Update Event
+// ✅ Update Event
 app.put("/api/events/:id", (req, res) => {
   const { id } = req.params;
   const { content } = req.body;
 
   const sql = "UPDATE events SET content = ? WHERE id = ?";
-  db.query(sql, [content, id], (err, result) => {
-    if (err) {
-      console.error("❌ Error updating event:", err);
-      return res.status(500).json({ success: false, error: err.message });
-    }
+  db.query(sql, [content, id], (err) => {
+    if (err) return res.status(500).json({ success: false, error: err.message });
     res.json({ success: true });
+  });
+});
+
+// ✅ Delete Event (owner only)
+app.delete("/api/events/:id", (req, res) => {
+  if (!req.session.user) return res.status(401).json({ error: "User not authenticated" });
+
+  const event_id = req.params.id;
+  const user_id = req.session.user.id;
+
+  const sql = "DELETE FROM events WHERE id = ? AND user_id = ?";
+  db.query(sql, [event_id, user_id], (err, result) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (result.affectedRows === 0) return res.status(403).json({ error: "Not authorized to delete this event" });
+
+    res.json({ success: true, message: "Event deleted successfully!" });
   });
 });
 
