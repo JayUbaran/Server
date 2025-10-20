@@ -3055,104 +3055,103 @@ app.get("/api/feedback-responses", (req, res) => {
 
 const MAX_INVITES_PER_MONTH = 2;
 
-app.post("/api/sendemployerinvite", (req, res) => {
+app.post("/api/sendemployerinvite", async (req, res) => {
   try {
-    if (!req.session?.user?.id) {
-      return res.status(401).json({ success: false, message: "Not logged in" });
-    }
+    const user = req.session?.user;
+    if (!user?.id) return res.status(401).json({ success: false, message: "Not logged in" });
 
-    const alumniId = req.session.user.id;
+    const alumniId = user.id;
     const { employerName, employerEmail, sendAutomatically } = req.body;
 
+    if (!employerName?.trim() || !employerEmail?.trim()) {
+      return res.status(400).json({ success: false, message: "Missing fields" });
+    }
+
+    // Validate email
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(employerEmail)) {
       return res.status(400).json({ success: false, message: "Invalid email address" });
     }
 
-    db.query(
-      "SELECT employer_invite_count, invite_last_reset FROM alumni WHERE id = ?",
-      [alumniId],
-      (err, result) => {
-        if (err) {
-          console.error("DB error (check invite count):", err);
-          return res.status(500).json({ success: false, message: "Server error" });
-        }
+    // Helper: promisify db.query
+    const query = (sql, params) =>
+      new Promise((resolve, reject) => {
+        db.query(sql, params, (err, results) => (err ? reject(err) : resolve(results)));
+      });
 
-        const now = new Date();
-        const thisMonth = `${now.getFullYear()}-${now.getMonth() + 1}`;
-        const lastReset = result[0]?.invite_last_reset;
-        let currentCount = result[0]?.employer_invite_count || 0;
-        const lastMonth =
-          lastReset &&
-          `${new Date(lastReset).getFullYear()}-${new Date(lastReset).getMonth() + 1}`;
+    // --- Check monthly limit ---
+    const alumniData = await query(
+      "SELECT employer_invite_count, invite_last_reset, full_name FROM alumni WHERE id = ?",
+      [alumniId]
+    );
 
-        if (lastMonth !== thisMonth) {
-          currentCount = 0;
-          db.query(
-            "UPDATE alumni SET employer_invite_count = 0, invite_last_reset = ? WHERE id = ?",
-            [now, alumniId]
-          );
-        }
+    if (!alumniData.length) return res.status(404).json({ success: false, message: "Alumni not found" });
 
-        if (currentCount >= MAX_INVITES_PER_MONTH) {
-          return res.json({
-            success: false,
-            message: `You have reached your monthly limit of ${MAX_INVITES_PER_MONTH} invitations.`,
-          });
-        }
+    const now = new Date();
+    const thisMonth = `${now.getFullYear()}-${now.getMonth() + 1}`;
+    const lastReset = alumniData[0].invite_last_reset;
+    const lastMonth = lastReset ? `${new Date(lastReset).getFullYear()}-${new Date(lastReset).getMonth() + 1}` : null;
+    let currentCount = alumniData[0].employer_invite_count || 0;
 
-        db.query("SELECT id FROM employers WHERE email = ?", [employerEmail], (err2, results) => {
-          if (err2) {
-            console.error("DB error (employer lookup):", err2);
-            return res.status(500).json({ success: false, message: "Database error" });
-          }
+    if (lastMonth !== thisMonth) {
+      currentCount = 0;
+      await query("UPDATE alumni SET employer_invite_count = 0, invite_last_reset = ? WHERE id = ?", [now, alumniId]);
+    }
 
-          const employerId = results.length ? results[0].id : null;
+    if (currentCount >= MAX_INVITES_PER_MONTH) {
+      return res.json({
+        success: false,
+        message: `You have reached your monthly limit of ${MAX_INVITES_PER_MONTH} invitations.`,
+      });
+    }
 
-          const handleEmployer = async (employerId) => {
-            const token = crypto.randomBytes(32).toString("hex");
-            const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    // --- Check or create employer ---
+    let employers = await query("SELECT id FROM employers WHERE email = ?", [employerEmail]);
+    let employerId = employers.length ? employers[0].id : null;
 
-            db.query(
-              `INSERT INTO employer_tokens (alumni_id, employer_id, token, expires_at, used)
-               VALUES (?, ?, ?, ?, false)`,
-              [alumniId, employerId, token, expiresAt],
-              async (err3) => {
-                if (err3) {
-                  console.error("DB error (token insert):", err3);
-                  return res.status(500).json({ success: false, message: "Failed to generate link" });
-                }
+    if (!employerId) {
+      const insertEmp = await query("INSERT INTO employers (name, email) VALUES (?, ?)", [employerName, employerEmail]);
+      employerId = insertEmp.insertId;
+    }
 
-                db.query(
-                  `UPDATE alumni 
-                   SET employer_invite_count = employer_invite_count + 1,
-                       invite_last_reset = ?
-                   WHERE id = ?`,
-                  [now, alumniId]
-                );
+    // --- Generate token ---
+    const token = crypto.randomBytes(32).toString("hex");
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
-                const link = `https://stii-memotrace-brxx.onrender.com/Efeedback?token=${token}`;
-                const alumniName = req.session.user.full_name || "One of our alumni";
+    await query(
+      "INSERT INTO employer_tokens (alumni_id, employer_id, token, expires_at, used) VALUES (?, ?, ?, ?, false)",
+      [alumniId, employerId, token, expiresAt]
+    );
 
-                if (sendAutomatically) {
-                  try {
-                    const brevoResponse = await fetch("https://api.brevo.com/v3/smtp/email", {
-                      method: "POST",
-                      headers: {
-                        "Content-Type": "application/json",
-                        "api-key": process.env.BREVO_API_KEY,
-                      },
-                      body: JSON.stringify({
-                        sender: { name: "STII Alumni Office", email: process.env.SMTP_USER },
-                        to: [{ email: employerEmail }],
-                        subject: "Employer Feedback Request",
-                        htmlContent: `
-                          <p>Dear ${employerName},</p>
-                          <p>${alumniName} listed you as their employer. Please complete our short feedback survey.</p>
-                          <p><a href="${link}" target="_blank">Click here to provide feedback</a></p>
-                          <p>This link expires in 7 days.</p>
-                        `,
-                        textContent: `
+    // --- Increment alumni invite count ---
+    await query(
+      "UPDATE alumni SET employer_invite_count = employer_invite_count + 1, invite_last_reset = ? WHERE id = ?",
+      [now, alumniId]
+    );
+
+    const link = `https://stii-memotrace-brxx.onrender.com/Efeedback?token=${token}`;
+    const alumniName = alumniData[0].full_name || "One of our alumni";
+
+    if (sendAutomatically) {
+      // --- Send email via Brevo ---
+      try {
+        const brevoRes = await fetch("https://api.brevo.com/v3/smtp/email", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "api-key": process.env.BREVO_API_KEY,
+          },
+          body: JSON.stringify({
+            sender: { name: "STII Alumni Office", email: process.env.SMTP_USER },
+            to: [{ email: employerEmail }],
+            subject: "Employer Feedback Request",
+            htmlContent: `
+              <p>Dear ${employerName},</p>
+              <p>${alumniName} listed you as their employer. Please complete our short feedback survey.</p>
+              <p><a href="${link}" target="_blank">Click here to provide feedback</a></p>
+              <p>This link expires in 7 days.</p>
+            `,
+            textContent: `
 Dear ${employerName},
 
 ${alumniName} listed you as their employer. Please complete our short feedback survey:
@@ -3160,60 +3159,39 @@ ${alumniName} listed you as their employer. Please complete our short feedback s
 ${link}
 
 This link expires in 7 days.
-                        `,
-                      }),
-                    });
-
-                    const data = await brevoResponse.json();
-                    if (!brevoResponse.ok) {
-                      console.error("❌ Brevo API error:", data);
-                      return res.status(500).json({ success: false, message: "Failed to send email." });
-                    }
-
-                    console.log(`✅ Employer feedback email sent to: ${employerEmail}`);
-                    return res.json({
-                      success: true,
-                      message: `Invitation sent to ${employerEmail}. (${currentCount + 1}/${MAX_INVITES_PER_MONTH} this month)`,
-                    });
-
-                  } catch (emailErr) {
-                    console.error("❌ Error sending employer feedback email:", emailErr);
-                    return res.status(500).json({ success: false, message: "Failed to send email." });
-                  }
-                } else {
-                  return res.json({
-                    success: true,
-                    message: `Invitation link generated. (${currentCount + 1}/${MAX_INVITES_PER_MONTH} this month)`,
-                    inviteLink: link,
-                  });
-                }
-              }
-            );
-          };
-
-          if (!employerId) {
-            db.query(
-              "INSERT INTO employers (name, email) VALUES (?, ?)",
-              [employerName, employerEmail],
-              (insertErr, insertResult) => {
-                if (insertErr) {
-                  console.error("Employer insert error:", insertErr);
-                  return res.status(500).json({ success: false, message: "Failed to add employer" });
-                }
-                handleEmployer(insertResult.insertId);
-              }
-            );
-          } else {
-            handleEmployer(employerId);
-          }
+            `,
+          }),
         });
+
+        const brevoData = await brevoRes.json();
+        if (!brevoRes.ok) {
+          console.error("Brevo API error:", brevoData);
+          return res.status(500).json({ success: false, message: "Failed to send email." });
+        }
+
+        console.log(`✅ Employer feedback email sent to: ${employerEmail}`);
+        return res.json({
+          success: true,
+          message: `Invitation sent to ${employerEmail}. (${currentCount + 1}/${MAX_INVITES_PER_MONTH} this month)`,
+        });
+      } catch (emailErr) {
+        console.error("Error sending email:", emailErr);
+        return res.status(500).json({ success: false, message: "Failed to send email." });
       }
-    );
+    } else {
+      // --- Only generate link ---
+      return res.json({
+        success: true,
+        message: `Invitation link generated. (${currentCount + 1}/${MAX_INVITES_PER_MONTH} this month)`,
+        inviteLink: link,
+      });
+    }
   } catch (err) {
-    console.error("❌ Error sending employer invite:", err);
-    res.status(500).json({ success: false, message: "Server error" });
+    console.error("Error sending employer invite:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 });
+
 
 // ✅ Get current invite count for logged-in alumni
 app.get("/api/employer-invite-count", (req, res) => {
