@@ -1039,28 +1039,25 @@ app.get("/api/profile", (req, res) => {
     res.json(results[0]); // return fresh user data from DB
   });
 });
-
-// ✅ Ensure uploads directory exists
-const uploadDirs = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadDirs)) {
-  fs.mkdirSync(uploadDirs, { recursive: true });
-}
-
-// ✅ Proper Multer setup
-const poststorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDirs);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, `${file.fieldname}-${uniqueSuffix}${ext}`);
+// ✅ Setup Cloudinary Storage for Multer
+const poststorage = new CloudinaryStorage({
+  cloudinary: cloudinary.v2,
+  params: async (req, file) => {
+    const folderName = "post_uploads"; // you can customize or make dynamic
+    const publicId = `${Date.now()}-${path.parse(file.originalname).name}`;
+    return {
+      folder: folderName,
+      public_id: publicId,
+      resource_type: "auto", // allows images, gifs, videos, pdfs, etc.
+      transformation: [{ quality: "auto", fetch_format: "auto" }],
+    };
   },
 });
 
+// ✅ Multer setup (with validation)
 const uploads = multer({
-  storage: poststorage, // ✅ FIXED — must be `storage: poststorage`
-  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB per file
+  storage: poststorage,
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB max per file
   fileFilter: (req, file, cb) => {
     const allowedTypes = ["image/jpeg", "image/png", "image/jpg", "image/webp"];
     if (!allowedTypes.includes(file.mimetype)) {
@@ -1070,10 +1067,8 @@ const uploads = multer({
   },
 });
 
-// ✅ Serve /uploads folder publicly
-app.use("/postuploads", express.static(uploadDirs));
 
-// ✅ POST route
+// ✅ POST route (Cloudinary)
 app.post(
   "/api/posts",
   (req, res, next) => {
@@ -1123,8 +1118,8 @@ app.post(
 
         const newPostId = result.insertId;
 
-        // ✅ Step 2: Save image URLs if any
-        const imageUrls = files.map((f) => `/postuploads/${f.filename}`);
+        // ✅ Step 2: Save image URLs from Cloudinary
+        const imageUrls = files.map((f) => f.path); // Cloudinary returns .path as URL
         if (imageUrls.length > 0) {
           const imgValues = imageUrls.map((url) => [newPostId, url]);
           const imgSql = "INSERT INTO post_images (post_id, image_url) VALUES ?";
