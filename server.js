@@ -1782,8 +1782,8 @@ app.get("/api/events", (req, res) => {
     const events = results.map((e) => ({
       id: e.id,
       user_id: e.user_id,
-      username: e.first_name,
-      lastname: e.last_name,
+      first_name: e.first_name,
+      last_name: e.last_name,
       profile: e.profile,
       content: e.content,
       images: e.images ? JSON.parse(e.images) : [],
