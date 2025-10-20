@@ -1042,7 +1042,7 @@ app.get("/api/profile", (req, res) => {
 
 // ✅ Setup Cloudinary Storage for Multer
 const poststorage = new CloudinaryStorage({
-  cloudinary: cloudinary.v2,
+   cloudinary: cloudinary,
   params: async (req, file) => {
     const folderName = "post_uploads"; // you can customize or make dynamic
     const publicId = `${Date.now()}-${path.parse(file.originalname).name}`;
@@ -1682,7 +1682,7 @@ app.post("/api/incrementlater", (req, res) => {
 
 // ✅ Multer + Cloudinary Storage
 const eventStorage = new CloudinaryStorage({
-  cloudinary: cloudinary.v2,
+    cloudinary: cloudinary,
   params: async (req, file) => {
     const folderName = "event_uploads";
     const publicId = `${Date.now()}-${path.parse(file.originalname).name}`;
@@ -1709,22 +1709,29 @@ const eventUpload = multer({
 
 // 📅 POST Event with Cloudinary
 app.post("/api/events", eventUpload.array("images", 5), (req, res) => {
-  if (!req.session.user) return res.status(401).json({ error: "User not authenticated" });
+  if (!req.session.user)
+    return res.status(401).json({ error: "User not authenticated" });
 
   const user_id = req.session.user.id;
   const { content, location_name, latitude, longitude } = req.body;
   const files = req.files || [];
 
-  // Map Cloudinary URLs
-  const imageUrls = files.map((file) => file.path);
+  const imageUrls = files.map((file) => file.secure_url || file.path);
 
   const sql = `
-    INSERT INTO events (user_id, content, location_name, latitude, longitude, images) 
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO events (user_id, content, location_name, latitude, longitude, images, created_at) 
+    VALUES (?, ?, ?, ?, ?, ?, NOW())
   `;
   db.query(
     sql,
-    [user_id, content, location_name || null, latitude || null, longitude || null, JSON.stringify(imageUrls)],
+    [
+      user_id,
+      content,
+      location_name || null,
+      latitude || null,
+      longitude || null,
+      JSON.stringify(imageUrls),
+    ],
     (err, result) => {
       if (err) {
         console.error("❌ Event insert error:", err);
@@ -1738,16 +1745,20 @@ app.post("/api/events", eventUpload.array("images", 5), (req, res) => {
         INSERT INTO notifications (type, message, related_id, user_id, created_at)
         VALUES (?, ?, ?, ?, NOW())
       `;
-      db.query(notifSql, ["event", "posted a new EVENT", newEventId, user_id], (notifErr) => {
-        if (notifErr) console.error("❌ Notification error:", notifErr.message || notifErr);
+      db.query(
+        notifSql,
+        ["event", "posted a new EVENT", newEventId, user_id],
+        (notifErr) => {
+          if (notifErr) console.error("❌ Notification error:", notifErr.message || notifErr);
 
-        res.status(201).json({
-          success: true,
-          message: "Event posted successfully!",
-          event_id: newEventId,
-          images: imageUrls,
-        });
-      });
+          res.status(201).json({
+            success: true,
+            message: "Event posted successfully!",
+            event_id: newEventId,
+            images: imageUrls,
+          });
+        }
+      );
     }
   );
 });
@@ -1766,9 +1777,26 @@ app.get("/api/events", (req, res) => {
 
   db.query(sql, (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json({ success: true, events: results });
+
+    // Parse JSON images
+    const events = results.map((e) => ({
+      id: e.id,
+      user_id: e.user_id,
+      username: e.first_name,
+      lastname: e.last_name,
+      profile: e.profile,
+      content: e.content,
+      images: e.images ? JSON.parse(e.images) : [],
+      location: e.location_name
+        ? { name: e.location_name, lat: e.latitude, lon: e.longitude }
+        : null,
+      date_posted: e.created_at,
+    }));
+
+    res.json({ success: true, events });
   });
 });
+
 
 // ✅ Update Event
 app.put("/api/events/:id", (req, res) => {
