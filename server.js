@@ -868,7 +868,7 @@ app.get("/api/verify-email", (req, res) => {
     });
 
     // ✅ Redirect to login page after verification
-    res.redirect("https://stii-memotrace-brxx.onrender.com/login"); 
+    res.redirect("https://stii-memotrace-brxx.onrender.com"); 
     // 🔹 Change to your frontend login URL when deployed
   });
 });
