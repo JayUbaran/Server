@@ -17,7 +17,7 @@ const fetch = require("node-fetch");
 
 app.use(
   cors({
-    origin: "https://stii-memotrace.onrender.com", // Allow requests only from your frontend
+    origin: "https://stii-memotrace-brxx.onrender.com", // Allow requests only from your frontend
      methods: ['GET','POST','PUT','DELETE','OPTIONS'],
     credentials: true, 
   })
@@ -868,7 +868,7 @@ app.get("/api/verify-email", (req, res) => {
     });
 
     // ✅ Redirect to login page after verification
-    res.redirect("https://stii-memotrace.onrender.com/login"); 
+    res.redirect("https://stii-memotrace-brxx.onrender.com/login"); 
     // 🔹 Change to your frontend login URL when deployed
   });
 });
@@ -897,11 +897,11 @@ async function sendVerificationEmail(email, token, res) {
         subject: "Verify Your Email",
         htmlContent: `
           <p>Click the link below to verify your Memotrace email account:</p>
-          <p><a href="https://stii-memotrace.onrender.com/api/verify-email?token=${token}">
+          <p><a href="https://stii-memotrace-brxx.onrender.com/api/verify-email?token=${token}">
           Verify Email</a></p>
           <p>— MemoTrace Team</p>
         `,
-        textContent: `Click the link to verify your Memotrace email account: https://stii-memotrace.onrender.com/api/verify-email?token=${token}`,
+        textContent: `Click the link to verify your Memotrace email account: https://stii-memotrace-brxx.onrender.com/api/verify-email?token=${token}`,
       }),
     });
 
@@ -3141,7 +3141,7 @@ app.post("/api/sendemployerinvite", (req, res) => {
                   [now, alumniId]
                 );
 
-                const link = `https://stii-memotrace.onrender.com/Efeedback?token=${token}`;
+                const link = `https://stii-memotrace-brxx.onrender.com/Efeedback?token=${token}`;
                 const alumniName = req.session.user.full_name || "One of our alumni";
 
                 if (sendAutomatically) {
