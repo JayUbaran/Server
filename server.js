@@ -1039,6 +1039,7 @@ app.get("/api/profile", (req, res) => {
     res.json(results[0]); // return fresh user data from DB
   });
 });
+
 // ✅ Setup Cloudinary Storage for Multer
 const poststorage = new CloudinaryStorage({
   cloudinary: cloudinary.v2,
@@ -1214,7 +1215,6 @@ app.get("/api/notifications", (req, res) => {
   });
 });
 
-
 // Get all posts
 app.get("/api/posts", (req, res) => {
   if (!req.session.user) {
@@ -1242,38 +1242,33 @@ app.get("/api/posts", (req, res) => {
 
   db.query(sql, (err, results) => {
     if (err) {
-      console.error("❌ Error fetching posts:", err.sqlMessage || err);
       return res.status(500).json({ error: "Internal Server Error" });
     }
 
+    // Map posts by post_id
     const postsMap = results.reduce((acc, row) => {
-  if (!acc[row.post_id]) {
-    acc[row.post_id] = {
-      id: row.post_id,
-      user_id: row.user_id,
-      username: row.first_name,
-      lastname: row.last_name,
-      profile_image: row.profile,
-      content: row.content,
-      date_posted: row.date_posted,
-      images: [],
-      location: row.location_name
-        ? { name: row.location_name, lat: row.latitude, lon: row.longitude }
-        : null,
-    };
-  }
+      if (!acc[row.post_id]) {
+        acc[row.post_id] = {
+          id: row.post_id,
+          user_id: row.user_id,
+          username: row.first_name,
+          lastname: row.last_name,
+          profile_image: row.profile, // keep same as front-end expects
+          content: row.content,
+          date_posted: row.date_posted,
+          images: [],
+          location: row.location_name
+            ? { name: row.location_name, lat: row.latitude, lon: row.longitude }
+            : null,
+        };
+      }
 
-  if (row.image_url) {
-    // Only prepend / if it's a relative path (doesn't start with http or https)
-    const cleanUrl = row.image_url.startsWith("http")
-      ? row.image_url
-      : `/${row.image_url}`;
-    acc[row.post_id].images.push(cleanUrl);
-  }
+      if (row.image_url) {
+        acc[row.post_id].images.push(row.image_url);
+      }
 
-  return acc;
-}, {});
-
+      return acc;
+    }, {});
 
     res.json(Object.values(postsMap));
   });
