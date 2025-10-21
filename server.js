@@ -897,7 +897,7 @@ async function sendVerificationEmail(email, token, res) {
         subject: "Verify Your Email",
         htmlContent: `
           <p>Click the link below to verify your Memotrace email account:</p>
-          <p><a href="https://stii-memotrace-brxx.onrender.com/api/verify-email?token=${token}">
+          <p><a href="https://server-t48e.onrender.com/api/verify-email?token=${token}">Verify Email
           Verify Email</a></p>
           <p>— MemoTrace Team</p>
         `,
@@ -1790,13 +1790,26 @@ app.get("/api/events", (req, res) => {
       location: e.location_name
         ? { name: e.location_name, lat: e.latitude, lon: e.longitude }
         : null,
-      date_posted: e.created_at,
+      created_at: e.created_at,
     }));
 
     res.json({ success: true, events });
   });
 });
 
+app.get("/api/events/user", (req, res) => {
+  if (!req.session.user) {
+      return res.status(401).json({ error: "User not authenticated" });
+  }
+
+  const user_id = req.session.user.id;
+  const sql = "SELECT * FROM events WHERE user_id = ? ORDER BY created_at DESC";
+
+  db.query(sql, [user_id], (err, results) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(results);
+  });
+});
 
 // ✅ Update Event
 app.put("/api/events/:id", (req, res) => {
