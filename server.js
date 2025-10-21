@@ -1162,37 +1162,39 @@ app.post(
 
 app.get("/api/notifications", (req, res) => {
   const currentUserId = req.session.user?.id;
-
   const sql = `
-    SELECT 
+      SELECT 
       n.id,
       n.type,
       n.message,
       n.related_id,
       n.created_at,
-      u.first_name,
-      u.profile,
-      y.yearbook_name,
-      yi.file_path AS yearbook_image,  -- Cloudinary URL
-      p.content AS post_content,
+      ANY_VALUE(u.first_name) AS first_name,
+      ANY_VALUE(u.profile) AS profile,
+      ANY_VALUE(y.yearbook_name) AS yearbook_name,
+      ANY_VALUE(yi.file_path) AS yearbook_image,  -- Cloudinary URL
+      ANY_VALUE(p.content) AS post_content,
       GROUP_CONCAT(pi.image_url) AS post_images,  -- Cloudinary URLs
-      e.content AS event_content,
-      e.location_name AS event_location,
-      e.images AS event_images  -- CSV of Cloudinary URLs
+      ANY_VALUE(e.content) AS event_content,
+      ANY_VALUE(e.location_name) AS event_location,
+      ANY_VALUE(e.images) AS event_images  -- CSV of Cloudinary URLs
     FROM notifications n
     LEFT JOIN alumni u ON n.user_id = u.id
     LEFT JOIN yearbooks y ON n.type = 'yearbook' AND n.related_id = y.id
     LEFT JOIN (
-      SELECT yearbook_id, MIN(id) AS first_image_id FROM images GROUP BY yearbook_id
+      SELECT yearbook_id, MIN(id) AS first_image_id 
+      FROM images 
+      GROUP BY yearbook_id
     ) first_img ON y.id = first_img.yearbook_id
     LEFT JOIN images yi ON yi.id = first_img.first_image_id
     LEFT JOIN posts p ON n.type = 'post' AND n.related_id = p.id
     LEFT JOIN post_images pi ON pi.post_id = p.id
     LEFT JOIN events e ON n.type = 'event' AND n.related_id = e.id
-    WHERE (n.user_id != ? OR n.type = 'yearbook')
+    WHERE (n.user_id IS NOT NULL OR n.type = 'yearbook')
     GROUP BY n.id
     ORDER BY n.created_at DESC
-    LIMIT 10
+    LIMIT 10;
+
   `;
 
   db.query(sql, [currentUserId], (err, results) => {
