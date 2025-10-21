@@ -2007,22 +2007,21 @@ app.delete("/yearbook/:id", (req, res) => {
 
 
 // API to upload Excel file and save Alumni IDs to MySQL
+const storages = multer.memoryStorage();
+const uploadID = multer({ storages });
 
-app.post("/upload-alumni-ids", upload.single("alumniFile"), (req, res) => {
+app.post("/upload-alumni-ids", uploadID.single("alumniFile"), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ message: "No file uploaded" });
   }
 
-  const filePath = req.file.path;
-
   try {
-    const workbook = xlsx.readFile(filePath);
+    // Read Excel file from buffer
+    const workbook = xlsx.read(req.file.buffer, { type: "buffer" });
     const sheetName = workbook.SheetNames[0];
     const sheetData = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
 
-    // Check if file has any rows
     if (!sheetData || sheetData.length === 0) {
-      fs.unlinkSync(filePath);
       return res.status(400).json({ message: "Excel file is empty or invalid." });
     }
 
@@ -2033,18 +2032,14 @@ app.post("/upload-alumni-ids", upload.single("alumniFile"), (req, res) => {
       .map((id) => String(id).trim());
 
     if (alumniIDs.length === 0) {
-      fs.unlinkSync(filePath);
       return res.status(400).json({ message: "No valid Alumni IDs found in the file." });
     }
 
-    // Prepare for database insert
+    // Prepare values for database
     const sql = "INSERT IGNORE INTO alumni_ids (alumni_id) VALUES ?";
     const values = alumniIDs.map((id) => [id]);
 
     db.query(sql, [values], (err, result) => {
-      // Always delete uploaded file
-      fs.unlinkSync(filePath);
-
       if (err) {
         console.error("Database error:", err);
         return res.status(500).json({ message: "Error inserting into database", error: err });
@@ -2052,8 +2047,8 @@ app.post("/upload-alumni-ids", upload.single("alumniFile"), (req, res) => {
 
       return res.json({ message: `${result.affectedRows} Alumni IDs uploaded successfully.` });
     });
+
   } catch (error) {
-    fs.unlinkSync(filePath);
     console.error("File processing error:", error);
     return res.status(500).json({ message: "Error processing Excel file." });
   }
