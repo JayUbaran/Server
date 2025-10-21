@@ -145,6 +145,17 @@ app.get("/api/users", (req, res) => {
   });
 });
 
+app.get("/api/chat", (req, res) => {
+  const getAlumniQuery = "SELECT * FROM alumni";
+  db.query(getAlumniQuery, (err, results) => {
+      if (err) {
+          console.error("Error fetching alumni users:", err);
+          return res.status(500).json({ message: "Database error" });
+      }
+      res.json(results);
+  });
+});
+
 
 app.get("/api/users/:id", (req, res) => {
   const userId = req.params.id;
