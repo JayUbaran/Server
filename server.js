@@ -2014,60 +2014,63 @@ app.post("/upload-alumni-ids", upload.single("alumniFile"), (req, res) => {
   }
 
   const filePath = req.file.path;
+
   try {
     const workbook = xlsx.readFile(filePath);
     const sheetName = workbook.SheetNames[0];
     const sheetData = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
 
-    // DEBUG: Print keys in each row to confirm the header
-    console.log("Headers found in Excel:", Object.keys(sheetData[0]));
+    // Check if file has any rows
+    if (!sheetData || sheetData.length === 0) {
+      fs.unlinkSync(filePath);
+      return res.status(400).json({ message: "Excel file is empty or invalid." });
+    }
 
-    // Replace "Alumni ID" below with exact header name if needed
+    // Attempt both header formats: "AlumniID" or "Alumni ID"
     const alumniIDs = sheetData
-      .map(row => String(row["Alumni ID"]).trim()) // convert and trim
-      .filter(id => id && id !== "undefined" && id !== "null" && id !== ""); // remove empty/invalid
+      .map((row) => row["AlumniID"] ?? row["Alumni ID"])
+      .filter((id) => id !== undefined && id !== null && String(id).trim() !== "")
+      .map((id) => String(id).trim());
 
     if (alumniIDs.length === 0) {
       fs.unlinkSync(filePath);
       return res.status(400).json({ message: "No valid Alumni IDs found in the file." });
     }
 
-   const sql = "INSERT IGNORE INTO alumni_ids (alumni_id) VALUES ?";
-    const values = alumniIDs.map(id => [id]);
+    // Prepare for database insert
+    const sql = "INSERT IGNORE INTO alumni_ids (alumni_id) VALUES ?";
+    const values = alumniIDs.map((id) => [id]);
 
     db.query(sql, [values], (err, result) => {
+      // Always delete uploaded file
       fs.unlinkSync(filePath);
+
       if (err) {
         console.error("Database error:", err);
         return res.status(500).json({ message: "Error inserting into database", error: err });
       }
 
-      res.json({ message: `${result.affectedRows} Alumni IDs uploaded successfully` });
+      return res.json({ message: `${result.affectedRows} Alumni IDs uploaded successfully.` });
     });
-
   } catch (error) {
     fs.unlinkSync(filePath);
     console.error("File processing error:", error);
-    res.status(500).json({ message: "Error processing Excel file" });
+    return res.status(500).json({ message: "Error processing Excel file." });
   }
 });
 
  //for show alumni id number
 app.get("/check-alumni-id/:id", (req, res) => {
   const alumniID = req.params.id;
-  
+
   const sql = "SELECT * FROM alumni_ids WHERE alumni_id = ?";
   db.query(sql, [alumniID], (err, result) => {
-      if (err) {
-          console.error("Database error:", err);
-          return res.status(500).json({ message: "Database error" });
-      }
-      
-      if (result.length > 0) {
-          res.json({ exists: true });
-      } else {
-          res.json({ exists: false });
-      }
+    if (err) {
+      console.error("Database error:", err);
+      return res.status(500).json({ message: "Database error" });
+    }
+
+    return res.json({ exists: result.length > 0 });
   });
 });
 
