@@ -18,10 +18,16 @@ const fetch = require("node-fetch");
 app.use(
   cors({
     origin: "https://stii-memotrace-brxx.onrender.com", // Allow requests only from your frontend
-     methods: ['GET','POST','PUT','DELETE','OPTIONS'],
+     methods: ['GET','POST','PUT','DELETE', "PATCH", 'OPTIONS'],
     credentials: true, 
   })
 );
+// ✅ Ensure preflight (OPTIONS) requests are handled
+app.options("*", cors({
+  origin: "https://stii-memotrace-brxx.onrender.com",
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  credentials: true,
+}));
 
 // Allow larger JSON and URL-encoded bodies (for base64 images)
 app.use(express.json({ limit: "50mb" }));
