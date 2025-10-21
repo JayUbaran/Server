@@ -1173,38 +1173,35 @@ app.get("/api/notifications", (req, res) => {
       u.first_name,
       u.profile,
       y.yearbook_name,
-      yi.file_path AS yearbook_image,
+      yi.file_path AS yearbook_image,  -- Cloudinary URL
       p.content AS post_content,
-      GROUP_CONCAT(pi.image_url) AS post_images,
+      GROUP_CONCAT(pi.image_url) AS post_images,  -- Cloudinary URLs
       e.content AS event_content,
       e.location_name AS event_location,
-      e.images AS event_images
+      e.images AS event_images  -- CSV of Cloudinary URLs
     FROM notifications n
     LEFT JOIN alumni u ON n.user_id = u.id
     LEFT JOIN yearbooks y ON n.type = 'yearbook' AND n.related_id = y.id
     LEFT JOIN (
-      SELECT yearbook_id, MIN(id) AS first_image_id
-      FROM images
-      GROUP BY yearbook_id
+      SELECT yearbook_id, MIN(id) AS first_image_id FROM images GROUP BY yearbook_id
     ) first_img ON y.id = first_img.yearbook_id
     LEFT JOIN images yi ON yi.id = first_img.first_image_id
     LEFT JOIN posts p ON n.type = 'post' AND n.related_id = p.id
     LEFT JOIN post_images pi ON pi.post_id = p.id
     LEFT JOIN events e ON n.type = 'event' AND n.related_id = e.id
     WHERE (n.user_id != ? OR n.type = 'yearbook')
-    GROUP BY n.id, n.type, n.message, n.related_id, n.created_at, u.first_name, u.profile, 
-             y.yearbook_name, yi.file_path, p.content, e.content, e.location_name, e.images
+    GROUP BY n.id
     ORDER BY n.created_at DESC
     LIMIT 10
   `;
 
   db.query(sql, [currentUserId], (err, results) => {
     if (err) {
-      console.error("❌ Error fetching notifications:", err.sqlMessage || err);
+      console.error("❌ Error fetching notifications:", err);
       return res.status(500).json({ error: "Internal Server Error" });
     }
 
-    // Convert CSV post_images and event_images to arrays
+    // Convert CSV lists to arrays
     const formattedResults = results.map((r) => ({
       ...r,
       post_images: r.post_images ? r.post_images.split(",") : [],
@@ -1214,6 +1211,7 @@ app.get("/api/notifications", (req, res) => {
     res.json(formattedResults);
   });
 });
+
 
 // Get all posts
 app.get("/api/posts", (req, res) => {
