@@ -1207,7 +1207,14 @@ app.get("/api/notifications", (req, res) => {
     const formattedResults = results.map((r) => ({
       ...r,
       post_images: r.post_images ? r.post_images.split(",") : [],
-      event_images: r.event_images ? r.event_images.split(",") : [],
+      event_images: (() => {
+        try {
+          return r.event_images ? JSON.parse(r.event_images) : [];
+        } catch {
+          return r.event_images ? r.event_images.split(",") : [];
+        }
+      })(),
+
     }));
 
     res.json(formattedResults);
@@ -1357,6 +1364,10 @@ app.post("/api/messages", (req, res) => {
 app.get("/api/messages/:userId/conversations", (req, res) => {
   const { userId } = req.params;
 
+  if (!userId) {
+    return res.status(400).json({ error: "Missing user ID" });
+  }
+
   const sql = `
     SELECT 
       u.id AS partner_id,
@@ -1366,7 +1377,6 @@ app.get("/api/messages/:userId/conversations", (req, res) => {
       m.message AS last_message,
       m.created_at AS last_message_time,
 
-      -- 👇 Count unseen messages sent TO this user by the partner
       (
         SELECT COUNT(*)
         FROM messages AS um
@@ -1399,15 +1409,20 @@ app.get("/api/messages/:userId/conversations", (req, res) => {
     ORDER BY m.created_at DESC;
   `;
 
-  db.query(sql, [userId, userId, userId, userId, userId], (err, results) => {
-    if (err) {
-      console.error("⚠️ Error fetching conversations:", err);
-      return res.status(500).json({ error: err.message });
-    }
+  try {
+    db.query(sql, [userId, userId, userId, userId, userId], (err, results) => {
+      if (err) {
+        console.error("⚠️ Error fetching conversations:", err.sqlMessage);
+        return res.status(500).json({ error: "Database query error" });
+      }
 
-    console.log(`✅ Conversations fetched for user ${userId}:`, results.length);
-    res.json(results);
-  });
+      console.log(`✅ Conversations fetched for user ${userId}: ${results.length}`);
+      res.json(results);
+    });
+  } catch (error) {
+    console.error("❌ Server crashed while fetching conversations:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 
