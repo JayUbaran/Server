@@ -901,7 +901,7 @@ async function sendVerificationEmail(email, token, res) {
           Verify Email</a></p>
           <p>— MemoTrace Team</p>
         `,
-        textContent: `Click the link to verify your Memotrace email account: https://stii-memotrace-brxx.onrender.com/api/verify-email?token=${token}`,
+        textContent: `Click the link to verify your Memotrace email account: https://server-t48e.onrender.com/api/verify-email?token=${token}`,
       }),
     });
 
@@ -3142,7 +3142,7 @@ app.post("/api/sendemployerinvite", async (req, res) => {
       [now, alumniId]
     );
 
-    const link = `https://stii-memotrace-brxx.onrender.com/Efeedback?token=${token}`;
+    const link = `https://server-t48e.onrender.com/Efeedback?token=${token}`;
     const alumniName = alumniData[0].full_name || "One of our alumni";
 
     if (sendAutomatically) {
